@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Honeypot Threat Console</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#0a0e14;
+    --panel:#121822;
+    --border:#1f2937;
+    --text:#e6edf3;
+    --muted:#7d8590;
+    --alert:#ff3b30;
+    --alert-dim:#4a1512;
+    --info:#38bdf8;
+    --ok:#3fb950;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; background:var(--bg); color:var(--text);
+    font-family:'Inter',sans-serif;
+  }
+  .mono{ font-family:'IBM Plex Mono',monospace; }
+
+  #topbar{
+    display:flex; align-items:center; justify-content:space-between;
+    padding:16px 28px; border-bottom:1px solid var(--border);
+    background:linear-gradient(180deg,#0d1219,#0a0e14);
+  }
+  #topbar h1{
+    font-size:16px; font-weight:600; margin:0; letter-spacing:.03em;
+    text-transform:uppercase; color:var(--text);
+  }
+  #topbar h1 span{ color:var(--alert); }
+  #live{
+    display:flex; align-items:center; gap:8px;
+    font-family:'IBM Plex Mono',monospace; font-size:12px; color:var(--ok);
+    letter-spacing:.05em;
+  }
+  #live .dot{
+    width:8px; height:8px; border-radius:50%; background:var(--ok);
+    box-shadow:0 0 0 0 rgba(63,185,80,.6);
+    animation:pulse 1.6s infinite;
+  }
+  @keyframes pulse{
+    0%{ box-shadow:0 0 0 0 rgba(63,185,80,.55); }
+    70%{ box-shadow:0 0 0 8px rgba(63,185,80,0); }
+    100%{ box-shadow:0 0 0 0 rgba(63,185,80,0); }
+  }
+
+  #stats{
+    display:grid; grid-template-columns:repeat(4,1fr); gap:1px;
+    background:var(--border); border-bottom:1px solid var(--border);
+  }
+  .stat{
+    background:var(--panel); padding:18px 24px;
+  }
+  .stat .label{
+    font-size:11px; text-transform:uppercase; letter-spacing:.08em;
+    color:var(--muted); margin-bottom:8px;
+  }
+  .stat .value{
+    font-family:'IBM Plex Mono',monospace; font-size:28px; font-weight:600;
+    color:var(--text);
+  }
+  .stat.danger .value{ color:var(--alert); }
+
+  #map{ height:42vh; width:100%; filter:saturate(0.9); }
+
+  #feed-section{ padding:20px 28px 36px; }
+  #feed-header{
+    display:flex; align-items:center; justify-content:space-between;
+    margin-bottom:12px;
+  }
+  #feed-header h2{
+    font-size:13px; text-transform:uppercase; letter-spacing:.08em;
+    color:var(--muted); font-weight:600; margin:0;
+  }
+  #feed{
+    border:1px solid var(--border); border-radius:6px;
+    background:#0d1219;
+    max-height:420px;
+    overflow-y:auto;
+  }
+  #feed thead th{
+    position:sticky; top:0; z-index:1;
+  }
+  #feed::-webkit-scrollbar{ width:8px; }
+  #feed::-webkit-scrollbar-track{ background:#0d1219; }
+  #feed::-webkit-scrollbar-thumb{ background:#2d3745; border-radius:4px; }
+  #feed::-webkit-scrollbar-thumb:hover{ background:#3d4a5c; }
+
+  table{ width:100%; border-collapse:collapse; font-family:'IBM Plex Mono',monospace; font-size:12.5px; }
+  thead th{
+    text-align:left; padding:10px 16px; background:#0f141c;
+    color:var(--muted); font-weight:500; font-size:11px;
+    text-transform:uppercase; letter-spacing:.06em;
+    border-bottom:1px solid var(--border);
+  }
+  tbody td{
+    padding:9px 16px; border-bottom:1px solid #171d27; color:#c9d1d9;
+  }
+  tbody tr:hover{ background:#121824; }
+  tbody tr.repeat td{ color:#ffb4ad; }
+  tbody tr.repeat td:first-child{ border-left:2px solid var(--alert); }
+  .tag{
+    display:inline-block; padding:2px 8px; border-radius:3px;
+    font-size:10.5px; font-weight:600; letter-spacing:.03em;
+  }
+  .tag.repeat{ background:var(--alert-dim); color:#ff8f87; }
+  .tag.first{ background:#132a1c; color:var(--ok); }
+  #empty{ padding:40px; text-align:center; color:var(--muted); font-family:'IBM Plex Mono',monospace; font-size:13px; }
+</style>
+</head>
+<body>
+
+<div id="topbar">
+  <h1>HONEYPOT <span>THREAT CONSOLE</span></h1>
+  <div id="live"><span class="dot"></span>LIVE — polling every 5s</div>
+</div>
+
+<div id="stats">
+  <div class="stat danger"><div class="label">Total Attempts</div><div class="value mono" id="stat-total">0</div></div>
+  <div class="stat"><div class="label">Unique Source IPs</div><div class="value mono" id="stat-ips">0</div></div>
+  <div class="stat"><div class="label">Usernames Tried</div><div class="value mono" id="stat-users">0</div></div>
+  <div class="stat"><div class="label">Most Targeted</div><div class="value mono" id="stat-top">-</div></div>
+</div>
+
+<div id="map"></div>
+
+<div id="feed-section">
+  <div id="feed-header">
+    <h2>Live Threat Feed</h2>
+  </div>
+  <div id="feed">
+    <table>
+      <thead>
+        <tr><th>Time</th><th>Source IP</th><th>Location</th><th>Username</th><th>Password</th><th>Status</th></tr>
+      </thead>
+      <tbody id="table-body"></tbody>
+    </table>
+    <div id="empty" style="display:none;">No attempts captured yet — try: ssh -p 2222 test@localhost</div>
+  </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+const map = L.map('map', { zoomControl:false }).setView([20,10], 2);
+L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+  attribution: '&copy; OpenStreetMap &copy; CARTO'
+}).addTo(map);
+
+const markers = [];
+
+async function fetchAttempts(){
+  const res = await fetch('/api/attempts');
+  const data = await res.json();
+
+  const ipCounts = {};
+  data.forEach(d => { ipCounts[d.source_ip] = (ipCounts[d.source_ip]||0)+1; });
+
+  const userCounts = {};
+  data.forEach(d => { userCounts[d.username] = (userCounts[d.username]||0)+1; });
+  let topUser = '-';
+  let topCount = 0;
+  for (const [u,c] of Object.entries(userCounts)){
+    if (c > topCount){ topCount = c; topUser = u; }
+  }
+
+  document.getElementById('stat-total').textContent = data.length;
+  document.getElementById('stat-ips').textContent = Object.keys(ipCounts).length;
+  document.getElementById('stat-users').textContent = Object.keys(userCounts).length;
+  document.getElementById('stat-top').textContent = topUser;
+
+  markers.forEach(m => map.removeLayer(m));
+  markers.length = 0;
+
+  const tbody = document.getElementById('table-body');
+  tbody.innerHTML = '';
+  document.getElementById('empty').style.display = data.length ? 'none' : 'block';
+
+  data.forEach(item => {
+    if (item.lat && item.lon && (item.lat !== 0 || item.lon !== 0)){
+      const marker = L.circleMarker([item.lat, item.lon], {
+        radius:6, color:'#ff3b30', fillColor:'#ff3b30', fillOpacity:0.75, weight:1
+      }).addTo(map);
+      marker.bindPopup(`<b>${item.source_ip}</b><br>${item.city}, ${item.country}<br>user: ${item.username}`);
+      markers.push(marker);
+    }
+
+    const isRepeat = ipCounts[item.source_ip] > 1;
+    const row = document.createElement('tr');
+    if (isRepeat) row.classList.add('repeat');
+    row.innerHTML = `
+      <td>${item.timestamp.replace('T',' ').split('.')[0]}</td>
+      <td>${item.source_ip}</td>
+      <td>${item.city}, ${item.country}</td>
+      <td>${item.username}</td>
+      <td>${item.password}</td>
+      <td><span class="tag ${isRepeat ? 'repeat' : 'first'}">${isRepeat ? 'REPEAT OFFENDER' : 'FIRST SEEN'}</span></td>
+    `;
+    tbody.appendChild(row);
+  });
+}
+
+fetchAttempts();
+setInterval(fetchAttempts, 5000);
+</script>
+</body>
+</html>
